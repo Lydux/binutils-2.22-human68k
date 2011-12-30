@@ -265,6 +265,7 @@ case ${generic_target} in
   m68k-*-netbsd*)			fmt=aout em=nbsd bfd_gas=yes ;;
   m68k-*-openbsd*)			fmt=aout em=nbsd bfd_gas=yes ;;
   m68k-*-psos*)				fmt=elf em=psos;;
+  m68k-*-human68k*)			fmt=elf ;;
 
   mep-*-elf)				fmt=elf ;;
 

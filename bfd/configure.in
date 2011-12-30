@@ -964,6 +964,7 @@ do
     vms_lib_txt_vec)		tb="$tb vms-lib.lo vms-misc.lo" ;;
     w65_vec)			tb="$tb coff-w65.lo reloc16.lo" ;;
     we32kcoff_vec)		tb="$tb coff-we32k.lo" ;;
+    xfile_vec)			tb="$tb xfile.lo" ;;
     z80coff_vec)		tb="$tb coff-z80.lo reloc16.lo" ;;
     z8kcoff_vec)		tb="$tb coff-z8k.lo reloc16.lo cofflink.lo" ;;
 

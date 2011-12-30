@@ -402,6 +402,7 @@ BFD32_BACKENDS = \
 	vms-lib.lo \
 	vms-misc.lo \
 	xcofflink.lo \
+	xfile.lo \
 	xsym.lo \
 	xtensa-isa.lo \
 	xtensa-modules.lo
@@ -585,6 +586,7 @@ BFD32_BACKENDS_CFILES = \
 	vms-lib.c \
 	vms-misc.c \
 	xcofflink.c \
+	xfile.c \
 	xsym.c \
 	xtensa-isa.c \
 	xtensa-modules.c

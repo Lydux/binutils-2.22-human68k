@@ -868,6 +868,7 @@ extern const bfd_target we32kcoff_vec;
 extern const bfd_target x86_64pe_vec;
 extern const bfd_target x86_64pei_vec;
 extern const bfd_target x86_64coff_vec;
+extern const bfd_target xfile_vec;
 extern const bfd_target z80coff_vec;
 extern const bfd_target z8kcoff_vec;
 
@@ -1280,6 +1281,7 @@ static const bfd_target * const _bfd_target_vector[] =
         &vms_lib_txt_vec,
 	&w65_vec,
 	&we32kcoff_vec,
+	&xfile_vec,
 	&z80coff_vec,
 	&z8kcoff_vec,
 	&bfd_elf32_am33lin_vec,
