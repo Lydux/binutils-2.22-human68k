@@ -122,6 +122,37 @@ struct xsyment {
 #define S_SYM_EXTERNAL  0x00
 #define S_SYM_LOCAL     0x02
 
+/* Swap external to internal header.  */
+
+static void
+xfile_swap_exec_header_in (bfd *abfd,
+                          struct xfile_internal_exec *execp,
+                          struct xext_hdr *bytes)
+{
+  execp->magic      = GET_MAGIC (abfd, bytes->magic);
+
+  execp->reserved1  = GET_BYTE (abfd, bytes->reserved1);
+  execp->loadmode   = GET_BYTE (abfd, bytes->loadmode);
+
+  execp->base       = GET_LONG (abfd, bytes->base);
+  execp->entry      = GET_LONG (abfd, bytes->entry);
+  execp->text_size  = GET_LONG (abfd, bytes->text_size);
+  execp->data_size  = GET_LONG (abfd, bytes->data_size);
+  execp->bss_size   = GET_LONG (abfd, bytes->bss_size);
+  execp->rel_size   = GET_LONG (abfd, bytes->rel_size);
+  execp->syms_size  = GET_LONG (abfd, bytes->syms_size);
+
+  execp->scdl       = GET_LONG (abfd, bytes->scdl);
+  execp->scdi       = GET_LONG (abfd, bytes->scdi);
+  execp->scdn       = GET_LONG (abfd, bytes->scdn);
+
+  execp->reserved[0]  = GET_LONG (abfd, bytes->reserved);
+  execp->reserved[1]  = GET_LONG (abfd, bytes->reserved + 4);
+  execp->reserved[2]  = GET_LONG (abfd, bytes->reserved + 8);
+  execp->reserved[3]  = GET_LONG (abfd, bytes->reserved + 12);
+  execp->reserved[4]  = GET_LONG (abfd, bytes->reserved + 16);
+}
+
 /* Swap internal header to external in the correct byte order.  */
 
 static void
@@ -160,12 +191,14 @@ xfile_swap_exec_header_out (bfd *abfd,
 static const bfd_target *
 xfile_object_p (bfd *abfd)
 {
-  unsigned short int mag;
+  struct xext_hdr exec;
+  bfd_size_type amt;
   
   if (bfd_seek (abfd, (file_ptr) 0, SEEK_SET) != 0)
     return NULL;
 
-  if (bfd_bread (&mag, (bfd_size_type) 2, abfd) != 2)
+  amt = sizeof (struct xext_hdr);
+  if (bfd_bread (&exec, amt, abfd) != amt)
   {
     if (bfd_get_error () != bfd_error_system_call)
       bfd_set_error (bfd_error_wrong_format);
