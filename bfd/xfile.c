@@ -92,10 +92,37 @@ struct xext_hdr
   unsigned char scdl[4];          /* Debug line number table size */
   unsigned char scdi[4];          /* Debug information size */
   unsigned char scdn[4];          /* Debug name table size */
-  unsigned char reserved[4*5];    /* Not used */
+  unsigned char reserved[4*5];    /* Not used (Sometimes the last 
+                                   * elements contains the file size) */
 };
 
-#define X_MAGIC     0x4855
+/* Header constants.  */
+#define X_MAGIC     0x4855        /* 'HU' */
+
+struct xsyment {
+  unsigned char s_location; /* 0x00 = External 0x02 = Local */
+  unsigned char s_section;  /* 0x01 = TEXT 0x02 = DATA 0x03 = BSS */
+  unsigned char s_value[4]; /* Symbol absolute position in code.  */
+};
+
+/* XSyment s_sections.  */
+#define N_TEXT  0x01
+#define N_DATA  0x02
+#define N_BSS   0x03
+#define N_STACK 0x04
+
+/* Sections helpers.  */
+#define xfile_section_is_text(section) (section->flags & SEC_CODE)
+#define xfile_section_is_data(section) (section->flags & SEC_DATA)
+#define xfile_section_is_bss(section) (section->flags == SEC_ALLOC)
+#define xfile_section_is_stack(section) \
+  (strcmp (bfd_section_name (abfd, section), ".stack") == 0)
+
+/* XSyment s_location.  */
+#define S_SYM_EXTERNAL  0x00
+#define S_SYM_LOCAL     0x02
+
+/* Swap internal header to external in the correct byte order.  */
 
 static void
 xfile_swap_exec_header_out (bfd *abfd,
@@ -259,14 +286,14 @@ xfile_prep_exec (bfd *abfd)
        section != NULL; 
        section = section->next)
   {
-    if (section->flags & SEC_CODE)
+    if (xfile_section_is_text (section))
       execp->text_size += section->size;
-
-    if (section->flags & SEC_DATA)
+    else if (xfile_section_is_data (section))
       execp->data_size += section->size;
-
-    if (section->flags == SEC_ALLOC)
+    else if (xfile_section_is_bss (section))
       execp->bss_size += section->size;
+    else
+      return FALSE;
   }
 
   return TRUE;
@@ -353,14 +380,16 @@ xfile_write_relocs (bfd *abfd)
       {
         /* Honour Human68k long relocations.  */
         PUT_LONG (abfd, delta, d);
-        bfd_bwrite (&d, 4, abfd);
+        if (bfd_bwrite (&d, 4, abfd) != 4)
+          return FALSE;
         relsec_size += 4;
       }
       else
       {
         /* Short reloc */
         PUT_SHORT (abfd, delta, d);
-        bfd_bwrite (&d, 2, abfd);
+        if (bfd_bwrite (&d, 2, abfd) != 2)
+          return FALSE;
         relsec_size += 2;
       }
 
@@ -371,9 +400,81 @@ xfile_write_relocs (bfd *abfd)
   }
   
   struct xfile_internal_exec *execp = &XDATA (abfd)->exec;
-  
   execp->rel_size = relsec_size;
   
+  return TRUE;
+}
+
+/* Write symbols.  */
+
+static bfd_boolean
+xfile_write_symbols (bfd *abfd)
+{
+  unsigned int count;
+  asymbol *sym, **generic = bfd_get_outsymbols (abfd);
+  asection *section;
+  bfd_size_type amt;
+  int syms_size = 0;
+
+  for (count = 0; count < bfd_get_symcount (abfd); count++)
+  {
+    sym = generic[count];
+
+    /* Debug syms & section not supported yet.  */
+    if (sym->flags & (BSF_FILE | BSF_SECTION_SYM))
+      continue;
+    
+    section = sym->section;
+
+    struct xsyment xsym;
+    
+    xsym.s_location = S_SYM_LOCAL;
+
+    if (bfd_is_com_section (section))
+    {
+      /* Special case */
+      xsym.s_location = S_SYM_EXTERNAL;
+      xsym.s_section = 0x03;
+    }
+    
+    if (xfile_section_is_text (section))
+      xsym.s_section = N_TEXT;
+    if (xfile_section_is_data (section))
+      xsym.s_section = N_DATA;
+    if (xfile_section_is_bss (section))
+      xsym.s_section = N_BSS;
+    else if (xfile_section_is_stack (section))
+      xsym.s_section = N_STACK;
+    else
+      /* Don't know what to do.  */
+      return FALSE;
+
+    PUT_LONG (abfd, sym->value, xsym.s_value);
+    
+    /* Write symbol infos.  */
+    amt = sizeof (struct xsyment);
+    if (bfd_bwrite (&xsym, amt, abfd) != amt)
+      return FALSE;
+      
+    syms_size += amt;
+      
+    /* Write symbol name.  */
+    amt = strlen (sym->name);
+    if (bfd_bwrite (sym->name, amt, abfd) != amt)
+      return FALSE;
+      
+    syms_size += amt;
+
+    amt = (2 - (amt & 1)); /* Honour 16 bits aligned string.  */
+    if (bfd_bwrite ("\0\0", amt, abfd) != amt)
+      return FALSE;
+    
+    syms_size += amt;
+  }
+
+  struct xfile_internal_exec *execp = &XDATA (abfd)->exec;
+  execp->syms_size = syms_size;
+
   return TRUE;
 }
 
@@ -389,10 +490,9 @@ xfile_write_object_contents (bfd *abfd)
     abfd->output_has_begun = TRUE;
   }
 
-  xfile_write_relocs (abfd);
-  xfile_write_head (abfd);
-
-  return TRUE;
+  return  xfile_write_relocs (abfd) &&
+          xfile_write_symbols (abfd) &&
+          xfile_write_head (abfd);
 }
 
 /* Write section content.  */
