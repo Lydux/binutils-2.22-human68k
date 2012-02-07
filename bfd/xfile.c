@@ -122,6 +122,7 @@ struct xsyment {
 #define S_SYM_EXTERNAL  0x00
 #define S_SYM_LOCAL     0x02
 
+#if 0
 /* Swap external to internal header.  */
 
 static void
@@ -152,6 +153,7 @@ xfile_swap_exec_header_in (bfd *abfd,
   execp->reserved[3]  = GET_LONG (abfd, bytes->reserved + 12);
   execp->reserved[4]  = GET_LONG (abfd, bytes->reserved + 16);
 }
+#endif
 
 /* Swap internal header to external in the correct byte order.  */
 
@@ -459,6 +461,9 @@ xfile_write_symbols (bfd *abfd)
     
     section = sym->section;
 
+    if ((section->flags & (SEC_LOAD | SEC_ALLOC)) == 0)
+      continue;
+
     struct xsyment xsym;
     
     xsym.s_location = S_SYM_LOCAL;
@@ -472,9 +477,9 @@ xfile_write_symbols (bfd *abfd)
     
     if (xfile_section_is_text (section))
       xsym.s_section = N_TEXT;
-    if (xfile_section_is_data (section))
+    else if (xfile_section_is_data (section))
       xsym.s_section = N_DATA;
-    if (xfile_section_is_bss (section))
+    else if (xfile_section_is_bss (section))
       xsym.s_section = N_BSS;
     else if (xfile_section_is_stack (section))
       xsym.s_section = N_STACK;
@@ -482,7 +487,7 @@ xfile_write_symbols (bfd *abfd)
       /* Don't know what to do.  */
       return FALSE;
 
-    PUT_LONG (abfd, sym->value, xsym.s_value);
+    PUT_LONG (abfd, sym->value + section->lma, xsym.s_value);
     
     /* Write symbol infos.  */
     amt = sizeof (struct xsyment);
