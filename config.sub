@@ -709,6 +709,10 @@ case $basic_machine in
 		basic_machine=hppa1.1-hp
 		os=-proelf
 		;;
+	human68k)
+		basic_machine=m68k-unknown
+		os=-human68k
+		;;
 	i370-ibm* | ibm*)
 		basic_machine=i370-ibm
 		;;

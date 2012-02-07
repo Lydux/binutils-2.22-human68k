@@ -290,6 +290,7 @@ ALL_EMULATION_SOURCES = \
 	ehppalinux.c \
 	ehppanbsd.c \
 	ehppaobsd.c \
+	ehuman68kxfile.c \
 	ei386aout.c \
 	ei386beos.c \
 	ei386bsd.c \
@@ -1291,6 +1292,9 @@ ehppaobsd.c: $(srcdir)/emulparams/hppaobsd.sh \
   $(ELF_DEPS) $(srcdir)/emultempl/hppaelf.em \
   $(srcdir)/scripttempl/elf.sc ${GEN_DEPENDS}
 	${GENSCRIPTS} hppaobsd "$(tdir_hppaobsd)"
+ehuman68kxfile.c : $(srcdir)/emulparams/human68kxfile.sh \
+  $(srcdir)/emultempl/generic.em $(srcdir)/scripttempl/human68kxfile.sc ${GEN_DEPENDS}
+	${GENSCRIPTS} human68kxfile "$(tdir_human68kxfile)"
 ei386aout.c: $(srcdir)/emulparams/i386aout.sh \
   $(srcdir)/emultempl/generic.em $(srcdir)/scripttempl/aout.sc ${GEN_DEPENDS}
 	${GENSCRIPTS} i386aout "$(tdir_i386aout)"
