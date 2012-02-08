@@ -1,51 +1,67 @@
 test -z "$ENTRY" && ENTRY=_start
-
 INIT='.init : { *(.init) }'
 FINI='.fini : { *(.fini) }'
+CTORS='.ctors : { *(.ctors) }'
+DTORS='.dtors : { *(.dtors) }'
 
 cat <<EOF
 OUTPUT_FORMAT("${OUTPUT_FORMAT}")
-OUTPUT_ARCH(${ARCH})
 ${LIB_SEARCH_DIRS}
 
 ${RELOCATING+ENTRY (${ENTRY})}
 
 SECTIONS
 {
-  .text ${RELOCATING+ SIZEOF_HEADERS} : {
-    ${RELOCATING+ PROVIDE (_init_start = .);}
-    ${RELOCATING+ PROVIDE (_init = .);}
-    ${RELOCATING+ KEEP (*(.init))}
-    ${RELOCATING+ PROVIDE (_init_end = .);}
+  .text ${RELOCATING-0} : {
 
+    ${RELOCATING+ *(.init)}
     *(.text)
+    *(.text.*)
 
-    ${RELOCATING+ PROVIDE (_fini_start = .);}
-    ${RELOCATING+ PROVIDE (_fini = .);}
-    ${RELOCATING+ KEEP (*(.fini))}
-    ${RELOCATING+ PROVIDE (_fini_end = .);}
-
-    ${RELOCATING+ etext  =  .};
+    ${RELOCATING+ *(.fini)} 
+    ${RELOCATING+ etext = .;}
+    ${RELOCATING+ _etext = .;}
   }
-  .data ${RELOCATING+ SIZEOF(.text) + ADDR(.text)} : {
+
+  .data ${RELOCATING+ SIZEOF(.text) + ADDR(.text)} :
+  {
+    ${CONSTRUCTING+ __ctors_start = . ; }
+    ${CONSTRUCTING+ *(.ctors) }
+    ${CONSTRUCTING+ __ctors_end = . ; }
+    ${CONSTRUCTING+ __dtors_start = . ; }
+    ${CONSTRUCTING+ *(.dtors) }
+    ${CONSTRUCTING+ __dtors_end = . ; }
+    KEEP(SORT(*)(.ctors))
+    KEEP(SORT(*)(.dtors))
+
     *(.data)
-    ${RELOCATING+ edata  =  .};
+    *(.data*)
+    *(.rodata)  /* We need to include .rodata here if gcc is used */
+    *(.rodata*) /* with -fdata-sections.  */
+
+    ${RELOCATING+*(.gcc_exc*)}
+    ${RELOCATING+___EH_FRAME_BEGIN__ = . ;}
+    ${RELOCATING+*(.eh_fram*)}
+    ${RELOCATING+___EH_FRAME_END__ = . ;}
+
+    ${RELOCATING+ edata = .;}
+    ${RELOCATING+ _edata = .;}
   }
   .bss ${RELOCATING+ SIZEOF(.data) + ADDR(.data)} :
-  { 					
+  {
     *(.bss)
     *(COMMON)
-    ${RELOCATING+ end = .};
+    ${RELOCATING+ end = .;}
+    ${RELOCATING+ _end = .;}
   }
   ${RELOCATING- ${INIT}}
   ${RELOCATING- ${FINI}}
-  .stab  0 ${RELOCATING+(NOLOAD)} : 
-  {
-    [ .stab ]
-  }
-  .stabstr  0 ${RELOCATING+(NOLOAD)} :
-  {
-    [ .stabstr ]
-  }
+  ${RELOCATING- ${CTORS}}
+  ${RELOCATING- ${DTORS}}
+
+  .comment 0 ${RELOCATING+(NOLOAD)} : { [ .comment ] [ .ident ] }
+  .stab 0 ${RELOCATING+(NOLOAD)} : { [ .stab ] }
+  .stabstr 0 ${RELOCATING+(NOLOAD)} : { [ .stabstr ] }
 }
 EOF
+
