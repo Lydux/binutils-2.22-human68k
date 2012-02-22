@@ -322,7 +322,12 @@ xfile_prep_exec (bfd *abfd)
        section = section->next)
   {
     if (xfile_section_is_text (section))
+    {
+      /* Text section lma will be the first loaded segment.
+       * Set its lma to base of loading address. */
+      execp->base = section->lma;
       execp->text_size += section->size;
+    }
     else if (xfile_section_is_data (section))
       execp->data_size += section->size;
     else if (xfile_section_is_bss (section))
