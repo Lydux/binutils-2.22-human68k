@@ -228,7 +228,7 @@ xfile_make_sections (bfd *abfd)
 {
   tdata_type *data = XDATA (abfd);
   struct xfile_internal_exec *execp = &XDATA (abfd)->exec;
-  bfd_vma lma = 0;
+  bfd_vma lma = execp->base;
   int count;
 
   if (execp->text_size > 0 && xfile_textsec (abfd) == NULL)
@@ -371,7 +371,7 @@ xfile_object_p (bfd *abfd)
   if (XDATA (abfd)->fixupcount > 0)
     abfd->flags |= HAS_RELOC;
 
-  bfd_get_start_address (abfd) = execp->entry;
+  bfd_get_start_address (abfd) = execp->entry - execp->base;
 
   return abfd->xvec;
 }
@@ -490,7 +490,7 @@ xfile_slurp_symbol_table (bfd *abfd ATTRIBUTE_UNUSED)
       syment->section = bfd_com_section_ptr;
 
     syment->the_bfd = abfd;
-    syment->value = GET_LONG (abfd, xsymptr->s_value);
+    syment->value = GET_LONG (abfd, xsymptr->s_value) - execp->base;
     syment->name = strcat (xsymname, strptr);
     xsymname += strlen (strptr) + 1;
 
