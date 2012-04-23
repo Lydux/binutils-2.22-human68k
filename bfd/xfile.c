@@ -159,6 +159,14 @@ struct xsyment {
 static int xfile_count_section_fixup (bfd *abfd, asection *s);
 static bfd_boolean xfile_slurp_fixup_table (bfd *abfd);
 
+/* XFile only perform absolute 32 bits relocation */
+
+static reloc_howto_type xfile_howto_table[] =
+{
+/* Type   rs size bsz  pcrel bitpos ovrf                  sf name     part_inpl readmask  setmask    pcdone */
+HOWTO( 0, 0,  4,   32, FALSE, 0, complain_overflow_dont, 0, "R_68K_32", TRUE, 0xffffffff, 0xffffffff, FALSE),
+};
+
 /* Swap external to internal header.  */
 
 static void
@@ -248,7 +256,10 @@ xfile_make_sections (bfd *abfd)
 
     count = xfile_count_section_fixup (abfd, s);
     if (count > 0)
+    {
+      s->reloc_count = count;
       s->flags |= SEC_RELOC;
+    }
 
     lma += execp->text_size;
   }
@@ -268,7 +279,10 @@ xfile_make_sections (bfd *abfd)
 
     count = xfile_count_section_fixup (abfd, s);
     if (count > 0)
+    {
+      s->reloc_count = count;
       s->flags |= SEC_RELOC;
+    }
     
     lma += execp->data_size;
   }
@@ -627,12 +641,58 @@ xfile_slurp_fixup_table (bfd *abfd)
   return TRUE;
 }
 
+static bfd_boolean
+xfile_build_reloc_table (bfd *abfd, sec_ptr asect, asymbol **symbols ATTRIBUTE_UNUSED)
+{
+  tdata_type *data = XDATA (abfd);
+  struct xfile_internal_exec *execp = &data->exec;
+  int i, count;
+  arelent *reloc_cache;
+  unsigned long *fixp;
+  arelent *rptr;
+
+  count = asect->reloc_count;
+
+  if (count == 0)
+    return TRUE;
+
+  reloc_cache = bfd_zmalloc (count * sizeof (arelent));
+  if (reloc_cache == NULL)
+    return FALSE;
+
+  /* Find the first entry for this section in fixup table */
+  fixp = data->fixuptab;
+  while (*fixp < asect->lma - execp->base)
+    fixp++;
+
+  for (i = 0, rptr = reloc_cache;
+       i < count; 
+       i++, rptr++, fixp++)
+  {
+     rptr->address = (bfd_size_type) *fixp - (asect->lma - execp->base);
+     rptr->addend = 0;
+     rptr->howto = &xfile_howto_table[0];
+     /* TODO : 
+      * To lookup for a symbol, we need to read the value pointed at 
+      * rptr->address within section image. Then lookup this value
+      * in symbol list.
+      */
+     rptr->sym_ptr_ptr = &asect->symbol;
+  }
+
+  asect->relocation = reloc_cache;
+
+  return TRUE;
+}
+
 static int
 xfile_count_section_fixup (bfd *abfd, asection *s)
 {
   tdata_type *data = XDATA (abfd);
+  struct xfile_internal_exec *execp = &data->exec;
   int count;
   unsigned long *p;
+  bfd_vma base = execp->base;
 
   if (data->fixuptab == NULL)
     xfile_slurp_fixup_table (abfd);
@@ -641,11 +701,11 @@ xfile_count_section_fixup (bfd *abfd, asection *s)
     return 0;
 
   p = data->fixuptab;
-  while (*p < s->lma)
+  while (*p + base < s->lma)
     p++;
 
   count = 0;
-  while (*p < s->lma + s->size)
+  while (*p + base < s->lma + s->size)
   {
     count++;
     p++;
@@ -654,15 +714,15 @@ xfile_count_section_fixup (bfd *abfd, asection *s)
   return count;
 }
 
-/* TODO:
+/*
  * Return the amount of memory needed to read the fixup reloc table.
  */
 
 static long
-xfile_get_reloc_upper_bound (bfd *abfd ATTRIBUTE_UNUSED,
-          sec_ptr asect ATTRIBUTE_UNUSED)
+xfile_get_reloc_upper_bound (bfd *abfd ATTRIBUTE_UNUSED, 
+                             sec_ptr asect)
 {
-  return 0;
+  return (asect->reloc_count + 1) * sizeof (arelent *);
 }
 
 /* TODO:
@@ -670,12 +730,33 @@ xfile_get_reloc_upper_bound (bfd *abfd ATTRIBUTE_UNUSED,
  */
 
 static long
-xfile_canonicalize_reloc (bfd *abfd ATTRIBUTE_UNUSED,
-          sec_ptr section ATTRIBUTE_UNUSED,
-          arelent **relptr ATTRIBUTE_UNUSED,
-          asymbol **symbols ATTRIBUTE_UNUSED)
+xfile_canonicalize_reloc (bfd *abfd,
+          sec_ptr section,
+          arelent **relptr,
+          asymbol **symbols)
 {
-  return 0;
+  arelent *tblptr;
+  bfd_size_type count;
+
+  if (section == xfile_bsssec (abfd))
+  {
+    *relptr = NULL;
+    return 0;
+  }
+
+  if (!xfile_build_reloc_table (abfd, section, symbols))
+    return FALSE;
+
+  tblptr = section->relocation;
+
+  for (count = 0; count < section->reloc_count; count++)
+  {
+    *relptr++ = tblptr++;
+  }
+
+  *relptr = NULL;
+
+  return section->reloc_count;
 }
 
 /* TODO:

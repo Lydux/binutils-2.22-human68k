@@ -12,7 +12,7 @@ ${RELOCATING+ENTRY (${ENTRY})}
 
 SECTIONS
 {
-  .text ${RELOCATING-0} : {
+  .text ${RELOCATING+ ${TEXT_START_ADDR}} : {
 
     ${RELOCATING+ *(.init)}
     *(.text)
