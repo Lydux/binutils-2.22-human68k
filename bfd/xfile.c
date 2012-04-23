@@ -229,6 +229,7 @@ xfile_make_sections (bfd *abfd)
   tdata_type *data = XDATA (abfd);
   struct xfile_internal_exec *execp = &XDATA (abfd)->exec;
   bfd_vma lma = execp->base;
+  asection *s;
   int count;
 
   if (execp->text_size > 0 && xfile_textsec (abfd) == NULL)
@@ -236,17 +237,18 @@ xfile_make_sections (bfd *abfd)
     if ((xfile_textsec (abfd) = bfd_make_section (abfd, ".text")) == NULL)
       return FALSE;
 
-    xfile_textsec (abfd)->size = execp->text_size;
-    xfile_textsec (abfd)->filepos = X_TXTOFF (execp);
-    xfile_textsec (abfd)->lma = xfile_textsec (abfd)->vma = lma;
-    xfile_textsec (abfd)->flags = SEC_HAS_CONTENTS | SEC_ALLOC |
-                                  SEC_LOAD | SEC_READONLY |
-				  SEC_CODE;
-    xfile_textsec (abfd)->alignment_power = 2;
+    s = xfile_textsec (abfd);
 
-    count = xfile_count_section_fixup (abfd, xfile_textsec (abfd));
+    s->size = execp->text_size;
+    s->filepos = X_TXTOFF (execp);
+    s->lma = s->vma = lma;
+    s->flags = SEC_HAS_CONTENTS | SEC_ALLOC | SEC_LOAD | SEC_READONLY |
+               SEC_CODE;
+    s->alignment_power = 2;
+
+    count = xfile_count_section_fixup (abfd, s);
     if (count > 0)
-      xfile_textsec (abfd)->flags |= SEC_RELOC;
+      s->flags |= SEC_RELOC;
 
     lma += execp->text_size;
   }
@@ -256,16 +258,17 @@ xfile_make_sections (bfd *abfd)
     if ((xfile_datasec (abfd) = bfd_make_section (abfd, ".data")) == NULL)
       return FALSE;
 
-    xfile_datasec (abfd)->size = execp->data_size;
-    xfile_datasec (abfd)->filepos = X_DATOFF (execp);
-    xfile_datasec (abfd)->lma = xfile_datasec (abfd)->vma = lma;
-    xfile_datasec (abfd)->flags = SEC_HAS_CONTENTS | SEC_ALLOC |
-                                  SEC_LOAD | SEC_DATA;
-    xfile_datasec (abfd)->alignment_power = 1;
+    s = xfile_datasec (abfd);
 
-    count = xfile_count_section_fixup (abfd, xfile_datasec (abfd));
+    s->size = execp->data_size;
+    s->filepos = X_DATOFF (execp);
+    s->lma = s->vma = lma;
+    s->flags = SEC_HAS_CONTENTS | SEC_ALLOC | SEC_LOAD | SEC_DATA;
+    s->alignment_power = 1;
+
+    count = xfile_count_section_fixup (abfd, s);
     if (count > 0)
-      xfile_datasec (abfd)->flags |= SEC_RELOC;
+      s->flags |= SEC_RELOC;
     
     lma += execp->data_size;
   }
@@ -275,10 +278,12 @@ xfile_make_sections (bfd *abfd)
     if ((data->bsssec = bfd_make_section (abfd, ".bss")) == NULL)
       return FALSE;
 
-    xfile_bsssec (abfd)->size = execp->bss_size;
-    xfile_bsssec (abfd)->lma = xfile_bsssec (abfd)->vma = lma;
-    xfile_bsssec (abfd)->flags = SEC_ALLOC;
-    xfile_bsssec (abfd)->alignment_power = 1;
+    s = xfile_bsssec (abfd);
+
+    s->size = execp->bss_size;
+    s->lma = s->vma = lma;
+    s->flags = SEC_ALLOC;
+    s->alignment_power = 1;
   }
 
   return TRUE;
@@ -305,7 +310,7 @@ xfile_mkobject (bfd *abfd)
   return TRUE;
 }
 
-/* TODO:
+/*
  * Check whether an existing file is an xfile object.
  */
 
@@ -376,8 +381,8 @@ xfile_object_p (bfd *abfd)
   return abfd->xvec;
 }
 
-/* TODO:
- * Get contents of the only section.
+/*
+ * Get contents of one section.
  */
 
 static bfd_boolean
@@ -500,7 +505,7 @@ xfile_slurp_symbol_table (bfd *abfd ATTRIBUTE_UNUSED)
   return TRUE;
 }
 
-/* TODO:
+/*
  * Return the amount of memory needed to read the symbol table.  
  */
 
@@ -513,7 +518,7 @@ xfile_get_symtab_upper_bound (bfd *abfd)
   return (bfd_get_symcount (abfd) + 1) * sizeof (asymbol *);
 }
 
-/* TODO:
+/* 
  * Return the symbol table.
  */
 
@@ -539,6 +544,10 @@ xfile_canonicalize_symtab (bfd *abfd,
   return symcount;
 }
 
+/* 
+ * Swap external to internal reloc fixup
+ */
+
 static unsigned long
 xfile_swap_fixup (bfd *abfd, unsigned short **fixup)
 {
@@ -556,6 +565,10 @@ xfile_swap_fixup (bfd *abfd, unsigned short **fixup)
 
   return rel;
 }
+
+/*
+ * Slurp the relocation fixup table
+ */
 
 static bfd_boolean
 xfile_slurp_fixup_table (bfd *abfd)
