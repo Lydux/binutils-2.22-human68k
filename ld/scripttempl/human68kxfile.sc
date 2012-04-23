@@ -19,6 +19,7 @@ SECTIONS
     *(.text.*)
 
     ${RELOCATING+ *(.fini)} 
+    ${RELOCATING+. = ALIGN (4);}
     ${RELOCATING+ etext = .;}
     ${RELOCATING+ _etext = .;}
   }
@@ -44,6 +45,7 @@ SECTIONS
     ${RELOCATING+*(.eh_fram*)}
     ${RELOCATING+___EH_FRAME_END__ = . ;}
 
+    ${RELOCATING+. = ALIGN (4);}
     ${RELOCATING+ edata = .;}
     ${RELOCATING+ _edata = .;}
   }
@@ -51,6 +53,7 @@ SECTIONS
   {
     *(.bss)
     *(COMMON)
+    ${RELOCATING+. = ALIGN (2);}
     ${RELOCATING+ end = .;}
     ${RELOCATING+ _end = .;}
   }
