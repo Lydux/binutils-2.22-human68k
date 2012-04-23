@@ -72,6 +72,22 @@ struct xfile_internal_exec
 typedef struct xfile_data_struct
 {
   struct xfile_internal_exec exec;
+
+  asection *textsec;
+  asection *datasec;
+  asection *bsssec;
+
+  asymbol *symbols;
+  char *strtab;
+  int strtabsize;
+
+  unsigned long *fixuptab;
+  int fixupcount;
+
+  file_ptr treloff;
+  bfd_size_type trelsz;
+  file_ptr dreloff;
+  bfd_size_type drelsz;
 }
 tdata_type;
 
@@ -100,9 +116,9 @@ struct xext_hdr
 #define X_MAGIC     0x4855        /* 'HU' */
 
 struct xsyment {
-  unsigned char s_location; /* 0x00 = External 0x02 = Local */
-  unsigned char s_section;  /* 0x01 = TEXT 0x02 = DATA 0x03 = BSS */
-  unsigned char s_value[4]; /* Symbol absolute position in code.  */
+  unsigned char s_location;	/* 0x00 = External 0x02 = Local */
+  unsigned char s_section;	/* 0x01 = TEXT 0x02 = DATA 0x03 = BSS */
+  unsigned char s_value[4];	/* Symbol absolute position in code.  */
 };
 
 /* XSyment s_sections.  */
@@ -118,11 +134,31 @@ struct xsyment {
 #define xfile_section_is_stack(section) \
   (strcmp (bfd_section_name (abfd, section), ".stack") == 0)
 
+#define xfile_textsec(abfd) (XDATA(abfd)->textsec)
+#define xfile_datasec(abfd) (XDATA(abfd)->datasec)
+#define xfile_bsssec(abfd) (XDATA(abfd)->bsssec)
+
 /* XSyment s_location.  */
 #define S_SYM_EXTERNAL  0x00
 #define S_SYM_LOCAL     0x02
 
-#if 0
+/* Relocations */
+#define X_LONG_RELFIXUP(r) (r & 1)
+
+/* Header helpers. */
+#define X_EXECSZ	(sizeof (struct xext_hdr))
+#define X_TXTOFF(execp)	(X_EXECSZ)
+#define X_DATOFF(execp) (X_TXTOFF(execp) + execp->text_size)
+#define X_RELOFF(execp) (X_DATOFF(execp) + execp->data_size)
+#define X_SYMOFF(execp) (X_RELOFF(execp) + execp->rel_size)
+#define X_SCDOFF(execp) (X_SYMOFF(execp) + execp->syms_size)
+
+/* XFile align all strings in a 2 bytes boundary (padded with zero) */
+#define STRALIGN(s) ((strlen (s) + 2) & ~1)
+
+static int xfile_count_section_fixup (bfd *abfd, asection *s);
+static bfd_boolean xfile_slurp_fixup_table (bfd *abfd);
+
 /* Swap external to internal header.  */
 
 static void
@@ -153,7 +189,6 @@ xfile_swap_exec_header_in (bfd *abfd,
   execp->reserved[3]  = GET_LONG (abfd, bytes->reserved + 12);
   execp->reserved[4]  = GET_LONG (abfd, bytes->reserved + 16);
 }
-#endif
 
 /* Swap internal header to external in the correct byte order.  */
 
@@ -186,28 +221,67 @@ xfile_swap_exec_header_out (bfd *abfd,
   PUT_LONG (abfd, execp->reserved[4], bytes->reserved + 16);
 }
 
-/* TODO:
- * Check whether an existing file is an xfile object.
- */
+/* Make all sections needed by xfile */
 
-static const bfd_target *
-xfile_object_p (bfd *abfd)
+static bfd_boolean
+xfile_make_sections (bfd *abfd)
 {
-  struct xext_hdr exec;
-  bfd_size_type amt;
-  
-  if (bfd_seek (abfd, (file_ptr) 0, SEEK_SET) != 0)
-    return NULL;
+  tdata_type *data = XDATA (abfd);
+  struct xfile_internal_exec *execp = &XDATA (abfd)->exec;
+  bfd_vma lma = 0;
+  int count;
 
-  amt = sizeof (struct xext_hdr);
-  if (bfd_bread (&exec, amt, abfd) != amt)
+  if (execp->text_size > 0 && xfile_textsec (abfd) == NULL)
   {
-    if (bfd_get_error () != bfd_error_system_call)
-      bfd_set_error (bfd_error_wrong_format);
-    return NULL;
+    if ((xfile_textsec (abfd) = bfd_make_section (abfd, ".text")) == NULL)
+      return FALSE;
+
+    xfile_textsec (abfd)->size = execp->text_size;
+    xfile_textsec (abfd)->filepos = X_TXTOFF (execp);
+    xfile_textsec (abfd)->lma = xfile_textsec (abfd)->vma = lma;
+    xfile_textsec (abfd)->flags = SEC_HAS_CONTENTS | SEC_ALLOC |
+                                  SEC_LOAD | SEC_READONLY |
+				  SEC_CODE;
+    xfile_textsec (abfd)->alignment_power = 2;
+
+    count = xfile_count_section_fixup (abfd, xfile_textsec (abfd));
+    if (count > 0)
+      xfile_textsec (abfd)->flags |= SEC_RELOC;
+
+    lma += execp->text_size;
   }
 
-  return abfd->xvec;
+  if (execp->data_size > 0 && xfile_datasec (abfd) == NULL)
+  {
+    if ((xfile_datasec (abfd) = bfd_make_section (abfd, ".data")) == NULL)
+      return FALSE;
+
+    xfile_datasec (abfd)->size = execp->data_size;
+    xfile_datasec (abfd)->filepos = X_DATOFF (execp);
+    xfile_datasec (abfd)->lma = xfile_datasec (abfd)->vma = lma;
+    xfile_datasec (abfd)->flags = SEC_HAS_CONTENTS | SEC_ALLOC |
+                                  SEC_LOAD | SEC_DATA;
+    xfile_datasec (abfd)->alignment_power = 1;
+
+    count = xfile_count_section_fixup (abfd, xfile_datasec (abfd));
+    if (count > 0)
+      xfile_datasec (abfd)->flags |= SEC_RELOC;
+    
+    lma += execp->data_size;
+  }
+
+  if (execp->bss_size > 0 && xfile_bsssec (abfd) == NULL)
+  {
+    if ((data->bsssec = bfd_make_section (abfd, ".bss")) == NULL)
+      return FALSE;
+
+    xfile_bsssec (abfd)->size = execp->bss_size;
+    xfile_bsssec (abfd)->lma = xfile_bsssec (abfd)->vma = lma;
+    xfile_bsssec (abfd)->flags = SEC_ALLOC;
+    xfile_bsssec (abfd)->alignment_power = 1;
+  }
+
+  return TRUE;
 }
 
 /* Set up the tdata informations.  */
@@ -223,7 +297,7 @@ xfile_mkobject (bfd *abfd)
     if (tdata == NULL)
       return FALSE;
 
-    abfd->tdata.xfile_data = tdata;
+    XDATA (abfd) = tdata;
   }
 
   bfd_default_set_arch_mach (abfd, bfd_arch_m68k, 0);
@@ -232,16 +306,197 @@ xfile_mkobject (bfd *abfd)
 }
 
 /* TODO:
+ * Check whether an existing file is an xfile object.
+ */
+
+static const bfd_target *
+xfile_object_p (bfd *abfd)
+{
+  struct xext_hdr bytes;
+  struct xfile_internal_exec *execp;
+  bfd_size_type amt;
+  struct stat statbuf;
+  
+  if (bfd_seek (abfd, (file_ptr) 0, SEEK_SET) != 0)
+    return NULL;
+
+  amt = sizeof (struct xext_hdr);
+  if (bfd_bread (&bytes, amt, abfd) != amt)
+  {
+    if (bfd_get_error () != bfd_error_system_call)
+      bfd_set_error (bfd_error_wrong_format);
+    return NULL;
+  }
+
+  xfile_mkobject (abfd);
+
+  execp = &XDATA(abfd)->exec;
+  xfile_swap_exec_header_in (abfd, execp, &bytes);
+
+  /* Magic must be "HU" */
+  if (execp->magic != X_MAGIC)
+  {
+    bfd_set_error (bfd_error_wrong_format);
+    return NULL;
+  }
+
+  /* Some more validations : sum of each block size must be
+   * equal to file size.
+   * FIXME : SCD isn't the last block. Find a way to generate those */
+  amt = X_SCDOFF (execp);
+  
+  if (bfd_stat (abfd, &statbuf) < 0)
+  {
+    bfd_set_error (bfd_error_system_call);
+    return NULL;
+  }
+
+  if ( (off_t) amt != statbuf.st_size)
+  {
+    bfd_set_error (bfd_error_file_truncated);
+    return NULL;
+  }
+
+  /* Relocation fixups are needed for section flags */
+  xfile_slurp_fixup_table (abfd);
+
+  xfile_make_sections (abfd);
+
+  /* Fill flags */
+  abfd->flags = EXEC_P;
+
+  if (execp->syms_size > 0)
+    abfd->flags |= HAS_SYMS;
+ 
+  if (XDATA (abfd)->fixupcount > 0)
+    abfd->flags |= HAS_RELOC;
+
+  bfd_get_start_address (abfd) = execp->entry;
+
+  return abfd->xvec;
+}
+
+/* TODO:
  * Get contents of the only section.
  */
 
 static bfd_boolean
-xfile_get_section_contents (bfd *abfd ATTRIBUTE_UNUSED,
-			     asection *section ATTRIBUTE_UNUSED,
-			     void * location ATTRIBUTE_UNUSED,
-			     file_ptr offset ATTRIBUTE_UNUSED,
-			     bfd_size_type count ATTRIBUTE_UNUSED)
+xfile_get_section_contents (bfd *abfd,
+                            asection *section,
+                            void * location,
+                            file_ptr offset,
+                            bfd_size_type count)
 {
+  if (count == 0 || ((section->flags & SEC_HAS_CONTENTS) == 0))
+    return TRUE;
+
+  if ((bfd_size_type) (offset+count) > section->size ||
+       bfd_seek (abfd, (file_ptr) (section->filepos + offset), SEEK_SET) != 0 ||
+       bfd_bread (location, count, abfd) != count)
+    return FALSE;
+
+  return TRUE;
+}
+
+/* Count the number of symbol in file.
+ * We just loop inside the sym block, looking for each symbol name
+ * end. There is no other way.
+ */
+
+static bfd_boolean
+xfile_slurp_symbol_table (bfd *abfd ATTRIBUTE_UNUSED)
+{
+  tdata_type *data = XDATA (abfd);
+  struct xfile_internal_exec *execp = &data->exec;
+  bfd_size_type amt;
+  unsigned char *xsymcache;
+  asymbol *syment;
+  struct xsyment *xsymptr;
+  char *xsymname, *strptr;
+  int symcount, strtabsize;
+
+  if (data->symbols != NULL)
+    return TRUE;
+
+  /* Cache symbols block */
+  amt = execp->syms_size;
+
+  xsymcache = bfd_alloc (abfd, amt);
+
+  if ((bfd_seek (abfd, (file_ptr) X_SYMOFF (execp), SEEK_SET) !=0) ||
+      (bfd_bread (xsymcache, amt, abfd) != amt))
+  {
+    bfd_set_error (bfd_error_system_call);
+    return FALSE;
+  }
+
+  /* Count all symbols we have as well as the amount of bytes needed
+   * to store symbols names  */
+  xsymptr = (struct xsyment *) xsymcache;
+  symcount = 0;
+  strtabsize = 0;
+  while (xsymptr < (struct xsyment *) (xsymcache + amt))
+  {
+    /* Validate symbol entry */
+    if (xsymptr->s_location != S_SYM_EXTERNAL &&
+        xsymptr->s_location != S_SYM_LOCAL)
+      return FALSE;
+
+    xsymname = (char *) (xsymptr + 1);
+    strtabsize += strlen (xsymname) + 1;
+    /* Strings are 16 bits aligned  */
+    xsymptr = (struct xsyment *) (xsymname + STRALIGN (xsymname));
+
+    symcount ++;
+  }
+
+  bfd_get_symcount (abfd) = symcount;
+  data->strtabsize = strtabsize;
+
+  if (symcount == 0)
+    return TRUE;
+
+  amt = symcount * sizeof (asymbol);
+  data->symbols = bfd_alloc (abfd, amt);
+
+  amt = data->strtabsize;
+  data->strtab = bfd_zalloc (abfd, amt);
+
+  xsymptr = (struct xsyment *) xsymcache;
+  xsymname = data->strtab;
+  for (syment = data->symbols;
+       symcount;
+       syment++, symcount--)
+  {
+    strptr = (char *) (xsymptr + 1);
+
+    if (xsymptr->s_location == S_SYM_LOCAL)
+    {
+      switch (xsymptr->s_section)
+      {
+        case N_TEXT:
+	  syment->section = xfile_textsec (abfd); break;
+	case N_DATA:
+	  syment->section = xfile_datasec (abfd); break;
+	case N_BSS:
+	  syment->section = xfile_bsssec (abfd); break;
+	default:
+	  /* FIXME : Maybe created with hlk060, or SX XFile */
+          syment->section = bfd_abs_section_ptr;
+      }
+    }
+    else
+      /* External symbol */
+      syment->section = bfd_com_section_ptr;
+
+    syment->the_bfd = abfd;
+    syment->value = GET_LONG (abfd, xsymptr->s_value);
+    syment->name = strcat (xsymname, strptr);
+    xsymname += strlen (strptr) + 1;
+
+    xsymptr = (struct xsyment *) (strptr + STRALIGN (strptr));
+  }
+
   return TRUE;
 }
 
@@ -250,9 +505,12 @@ xfile_get_section_contents (bfd *abfd ATTRIBUTE_UNUSED,
  */
 
 static long
-xfile_get_symtab_upper_bound (bfd *abfd ATTRIBUTE_UNUSED)
+xfile_get_symtab_upper_bound (bfd *abfd)
 {
-  return 0;
+  if (!xfile_slurp_symbol_table (abfd))
+    return -1;
+
+  return (bfd_get_symcount (abfd) + 1) * sizeof (asymbol *);
 }
 
 /* TODO:
@@ -260,10 +518,127 @@ xfile_get_symtab_upper_bound (bfd *abfd ATTRIBUTE_UNUSED)
  */
 
 static long
-xfile_canonicalize_symtab (bfd *abfd ATTRIBUTE_UNUSED,
-          asymbol **alocation ATTRIBUTE_UNUSED)
+xfile_canonicalize_symtab (bfd *abfd,
+          asymbol **alocation)
 {
-  return 0;
+  unsigned int i, symcount;
+  asymbol *s;
+
+  if (!xfile_slurp_symbol_table (abfd))
+    return -1;
+
+  symcount = bfd_get_symcount (abfd);
+
+  for (i = 0, s = XDATA (abfd)->symbols; 
+       i < symcount; 
+       s++, i++)
+    *alocation++ = s;
+
+  *alocation = NULL;
+
+  return symcount;
+}
+
+static unsigned long
+xfile_swap_fixup (bfd *abfd, unsigned short **fixup)
+{
+  unsigned long rel;
+
+  rel = GET_SHORT (abfd, *fixup);
+  (*fixup)++;
+
+  if (X_LONG_RELFIXUP (rel))
+  {
+    rel <<= 16;
+    rel |= GET_SHORT (abfd, *fixup);
+    (*fixup)++;
+  }
+
+  return rel;
+}
+
+static bfd_boolean
+xfile_slurp_fixup_table (bfd *abfd)
+{
+  tdata_type *data = XDATA (abfd);
+  struct xfile_internal_exec *execp = &data->exec;
+  unsigned short *fixupcache, *fixupend, *pfixup;
+  bfd_size_type i, amt, count;
+  bfd_vma base;
+  
+  amt = execp->rel_size;
+
+  if (amt == 0)
+    return TRUE;
+
+  fixupcache = bfd_malloc (amt);
+  fixupend = &fixupcache[amt / sizeof (unsigned short)];
+
+  if ((bfd_seek (abfd, (file_ptr) X_RELOFF (execp), SEEK_SET) != 0) ||
+      (bfd_bread (fixupcache, amt, abfd) != amt))
+  {
+     free (fixupcache);
+     return FALSE;
+  }
+
+  /* Count fixup table */
+  count = 0;
+  pfixup = fixupcache;
+  while (pfixup < fixupend)
+  {
+    if (xfile_swap_fixup (abfd, &pfixup) == 0)
+    {
+      free (fixupcache);
+      return FALSE;
+    }
+    count++;
+  }
+
+  /* Build table */
+  data->fixupcount = count;
+  amt = count * sizeof (bfd_vma);
+
+  data->fixuptab = bfd_alloc (abfd, amt);
+
+  base = 0;
+  pfixup = fixupcache;
+  for (i = 0; i < count; i++)
+  {
+    base += xfile_swap_fixup (abfd, &pfixup);
+
+    data->fixuptab[i] = base;
+  }
+ 
+  free (fixupcache);
+
+  return TRUE;
+}
+
+static int
+xfile_count_section_fixup (bfd *abfd, asection *s)
+{
+  tdata_type *data = XDATA (abfd);
+  int count;
+  unsigned long *p;
+
+  if (data->fixuptab == NULL)
+    xfile_slurp_fixup_table (abfd);
+
+  if (data->fixupcount == 0)
+    return 0;
+
+  p = data->fixuptab;
+  while (*p < s->lma)
+    p++;
+
+  count = 0;
+  while (*p < s->lma + s->size)
+  {
+    count++;
+    p++;
+  }
+
+  return count;
 }
 
 /* TODO:
@@ -300,6 +675,28 @@ xfile_get_symbol_info (bfd *abfd ATTRIBUTE_UNUSED,
           symbol_info *ret)
 {
   bfd_symbol_info (symbol, ret);
+}
+
+static void
+xfile_print_symbol (bfd *abfd, 
+          void *afile, 
+	  asymbol *symbol,
+	  bfd_print_symbol_type how)
+{
+  FILE *file = (FILE *) afile;
+
+  switch (how)
+  {
+    case bfd_print_symbol_name:
+    case bfd_print_symbol_more:
+      fprintf (file, "%s", symbol->name);
+      break;
+    case bfd_print_symbol_all:
+        bfd_print_symbol_vandf (abfd, (void *) file, symbol);
+	
+        fprintf (file, " %-5s %s", symbol->section->name, symbol->name);
+	break;
+  }
 }
 
 /* Fill exec header */
@@ -624,7 +1021,6 @@ xfile_sizeof_headers (bfd *abfd ATTRIBUTE_UNUSED,
 #define xfile_get_section_contents_in_window  \
     _bfd_generic_get_section_contents_in_window
 #define xfile_make_empty_symbol           _bfd_generic_make_empty_symbol
-#define xfile_print_symbol                _bfd_nosymbols_print_symbol
 #define xfile_bfd_is_local_label_name     bfd_generic_is_local_label_name
 #define xfile_bfd_is_target_special_symbol  \
     ((bfd_boolean (*) (bfd *, asymbol *)) bfd_false)
