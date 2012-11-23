@@ -1018,10 +1018,22 @@ xfile_write_symbols (bfd *abfd)
 static bfd_boolean
 xfile_write_object_contents (bfd *abfd)
 {
-  if (!abfd->output_has_begun)
+  if (abfd->flags & EXEC_P)
+  {    
+    if (!abfd->output_has_begun)
+    {
+      xfile_prep_exec (abfd);
+      abfd->output_has_begun = TRUE;
+    }
+  }
+  else
   {
-    xfile_prep_exec (abfd);
-    abfd->output_has_begun = TRUE;
+    /* TODO : if someone wants to add generation of HLK compatible 
+     * objects, implement it here. Until then, only support for high-end
+     * XFile conversion via objcopy. */
+    (*_bfd_error_handler) (_("Non executable object not supported yet"));
+    bfd_set_error (bfd_error_wrong_format);
+    return FALSE;
   }
 
   return  xfile_write_relocs (abfd) &&
