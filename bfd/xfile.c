@@ -876,6 +876,7 @@ xfile_write_relocs (bfd *abfd)
 {
   asection *s;
   arelent *reloc;
+  asymbol *sym;
   bfd_vma last_offset = 0, base = 0, offset, delta;
   int relsec_size = 0;
   unsigned i;
@@ -902,6 +903,15 @@ xfile_write_relocs (bfd *abfd)
       if (reloc->howto->type != 1)
         continue;
       
+      /* Discard relocations over absolute symbol. */
+      if (reloc->sym_ptr_ptr)
+      {
+        sym = (asymbol *) *reloc->sym_ptr_ptr;
+        
+        if (sym->section == bfd_abs_section_ptr)
+          continue;
+	  }
+
       /* Absolute offset in image.  */
       offset = reloc->address + base;
       /* Relative offset from the last one.  */
