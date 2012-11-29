@@ -14,6 +14,8 @@ SECTIONS
 {
   .text ${RELOCATING+ ${TEXT_START_ADDR}} : {
 
+    ${RELOCATING+ *(.header)}
+    ${RELOCATING+. = ALIGN(4);}
     ${RELOCATING+ *(.init)}
     *(.text)
     *(.text.*)
