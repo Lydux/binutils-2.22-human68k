@@ -509,7 +509,7 @@ xfile_slurp_symbol_table (bfd *abfd ATTRIBUTE_UNUSED)
       syment->section = bfd_com_section_ptr;
 
     syment->the_bfd = abfd;
-    syment->value = GET_LONG (abfd, xsymptr->s_value) - execp->base;
+    syment->value = GET_LONG (abfd, xsymptr->s_value) - syment->section->lma;
     syment->name = strcat (xsymname, strptr);
     xsymname += strlen (strptr) + 1;
 
