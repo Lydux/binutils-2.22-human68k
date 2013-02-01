@@ -705,7 +705,8 @@ xfile_count_section_fixup (bfd *abfd, asection *s)
     p++;
 
   count = 0;
-  while (*p + base < s->lma + s->size)
+  while ((count < data->fixupcount) && 
+         (*p + base < s->lma + s->size))
   {
     count++;
     p++;
